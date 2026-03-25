@@ -2,7 +2,6 @@ import { DurableObject } from "cloudflare:workers";
 
 export class AuctionRoom extends DurableObject {
   private title: string | null = null;
-  private memoryCounter = 0;
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
@@ -10,19 +9,36 @@ export class AuctionRoom extends DurableObject {
     this.ctx.blockConcurrencyWhile(async () => {
       try {
         this.ctx.storage.sql.exec(`
-          CREATE TABLE IF NOT EXISTS lifecycle_counter (
-            id INTEGER PRIMARY KEY,
-            value INTEGER NOT NULL
-          );
-
           CREATE TABLE IF NOT EXISTS auction_state (
             id TEXT PRIMARY KEY,
             title TEXT NOT NULL,
+            description TEXT NOT NULL DEFAULT '',
             status TEXT NOT NULL,
-            current_price INTEGER NOT NULL DEFAULT 0
+            starting_price INTEGER NOT NULL,
+            reserve_price INTEGER NOT NULL,
+            current_price INTEGER NOT NULL,
+            winner_user_id TEXT,
+            start_time INTEGER,
+            end_time INTEGER,
+            created_at INTEGER NOT NULL,
+            updated_at INTEGER NOT NULL
           );
-          
-          
+
+          CREATE TABLE IF NOT EXISTS bids (
+            id TEXT PRIMARY KEY,
+            auction_id TEXT NOT NULL,
+            user_id TEXT NOT NULL,
+            amount INTEGER NOT NULL,
+            created_at INTEGER NOT NULL,
+            idempotency_key TEXT NOT NULL UNIQUE
+          );
+
+          CREATE TABLE IF NOT EXISTS tasks (
+            id TEXT PRIMARY KEY,
+            run_at INTEGER NOT NULL,
+            type TEXT NOT NULL,
+            payload_json TEXT NOT NULL
+          );
         `);
       } catch (error) {
         console.error("init failed", error);
@@ -43,22 +59,6 @@ export class AuctionRoom extends DurableObject {
     };
   }
 
-  async bumpLifecycleCounters(): Promise<{ memory: number; durable: number }> {
-    this.memoryCounter += 1;
-
-    const current =
-      this.ctx.storage.sql
-        .exec<{ value: number }>("SELECT value FROM lifecycle_counter WHERE id = 1")
-        .toArray()[0]?.value ?? 0;
-
-    const next = current + 1;
-    this.ctx.storage.sql.exec(
-      "INSERT OR REPLACE INTO lifecycle_counter (id, value) VALUES (1, ?)",
-      next,
-    );
-
-    return { memory: this.memoryCounter, durable: next };
-  }
 }
 
 export default {
@@ -76,13 +76,6 @@ export default {
       const stub = env.AUCTION.getByName(auctionId);
       await stub.initAuction({ title: body.title });
       return new Response(null, { status: 204 });
-    }
-
-    // GET /bump?auctionId=... — lifecycle demo
-    if (url.pathname === "/bump") {
-      const stub = env.AUCTION.getByName(auctionId);
-      const counters = await stub.bumpLifecycleCounters();
-      return Response.json(counters);
     }
 
     const stub = env.AUCTION.getByName(auctionId);
