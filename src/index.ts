@@ -8,12 +8,26 @@ export class AuctionRoom extends DurableObject {
     super(ctx, env);
 
     this.ctx.blockConcurrencyWhile(async () => {
-      this.ctx.storage.sql.exec(`
-        CREATE TABLE IF NOT EXISTS lifecycle_counter (
-          id INTEGER PRIMARY KEY,
-          value INTEGER NOT NULL
-        )
-      `);
+      try {
+        this.ctx.storage.sql.exec(`
+          CREATE TABLE IF NOT EXISTS lifecycle_counter (
+            id INTEGER PRIMARY KEY,
+            value INTEGER NOT NULL
+          );
+
+          CREATE TABLE IF NOT EXISTS auction_state (
+            id TEXT PRIMARY KEY,
+            title TEXT NOT NULL,
+            status TEXT NOT NULL,
+            current_price INTEGER NOT NULL DEFAULT 0
+          );
+          
+          
+        `);
+      } catch (error) {
+        console.error("init failed", error);
+        throw error;
+      }
     });
   }
 
