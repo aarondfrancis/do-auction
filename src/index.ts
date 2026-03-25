@@ -1,15 +1,22 @@
-import {DurableObject} from "cloudflare:workers";
+import { DurableObject } from "cloudflare:workers";
 
 export class AuctionRoom extends DurableObject {
-  async getStatus(): Promise<string> {
-    return "auction not initialized";
+  async getDetails() {
+    return {
+      auctionId: this.ctx.id.toString(),
+      status: "not initialized",
+    };
   }
 }
 
 export default {
-  async fetch(_request: Request, env: Env) {
-    const stub = env.AUCTION.getByName("demo-auction");
-    const status = await stub.getStatus();
-    return new Response(status);
+  async fetch(request: Request, env: Env) {
+    const url = new URL(request.url);
+    const auctionId = url.searchParams.get("auctionId");
+    if (!auctionId) return new Response("Missing auctionId", { status: 400 });
+
+    const stub = env.AUCTION.getByName(auctionId);
+    const details = await stub.getDetails();
+    return Response.json(details);
   },
 } satisfies ExportedHandler<Env>;
