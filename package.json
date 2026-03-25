@@ -1,0 +1,16 @@
+{
+  "name": "durable-auction-app",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev",
+    "types": "wrangler types",
+    "predev": "wrangler types",
+    "postinstall": "wrangler types"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.3",
+    "wrangler": "^4.15.2"
+  }
+}
