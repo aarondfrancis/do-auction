@@ -60,7 +60,7 @@ export class AuctionRoom extends DurableObject {
     this.ctx.storage.sql.exec(
       `INSERT OR IGNORE INTO auction_state
         (id, title, status, starting_price, reserve_price, current_price, created_at, updated_at)
-       VALUES (?, ?, 'draft', ?, ?, ?, ?, ?)`,
+       VALUES (?, ?, 'active', ?, ?, ?, ?, ?)`,
       this.ctx.id.toString(),
       input.title,
       input.startingPrice,
@@ -87,17 +87,44 @@ export class AuctionRoom extends DurableObject {
       .one();
   }
 
-  addBid(userId: string, amount: number) {
+  placeBid(input: { userId: string; amount: number; idempotencyKey: string }) {
+    const state = this.ctx.storage.sql
+      .exec<{ status: string; current_price: number }>(
+        "SELECT status, current_price FROM auction_state WHERE id = ?",
+        this.ctx.id.toString(),
+      )
+      .toArray()[0];
+
+    if (!state) throw new Error("AUCTION_NOT_FOUND");
+    if (state.status !== "active") throw new Error("AUCTION_NOT_ACTIVE");
+    if (input.amount <= state.current_price) throw new Error("BID_TOO_LOW");
+
+    const now = Date.now();
+
     this.ctx.storage.sql.exec(
       `INSERT INTO bids (id, auction_id, user_id, amount, created_at, idempotency_key)
        VALUES (?, ?, ?, ?, ?, ?)`,
       crypto.randomUUID(),
       this.ctx.id.toString(),
-      userId,
-      amount,
-      Date.now(),
-      `demo-${crypto.randomUUID()}`,
+      input.userId,
+      input.amount,
+      now,
+      input.idempotencyKey,
     );
+
+    this.ctx.storage.sql.exec(
+      "UPDATE auction_state SET current_price = ?, winner_user_id = ?, updated_at = ? WHERE id = ?",
+      input.amount,
+      input.userId,
+      now,
+      this.ctx.id.toString(),
+    );
+
+    return {
+      accepted: true,
+      currentPrice: input.amount,
+      winnerUserId: input.userId,
+    };
   }
 
   getHistory(limit = 50, offset = 0) {
@@ -129,16 +156,31 @@ export default {
       return new Response(null, { status: 201 });
     }
 
-    // POST /bids?auctionId=... — seed a demo bid
+    // POST /bids?auctionId=... — place a bid
     if (request.method === "POST" && url.pathname === "/bids") {
-      const body = (await request.json()) as { userId?: string; amount?: number };
-      if (!body.userId || !body.amount) {
+      const body = (await request.json()) as {
+        userId?: string;
+        amount?: number;
+        idempotencyKey?: string;
+      };
+      if (!body.userId || !body.amount || !body.idempotencyKey) {
         return new Response("Invalid payload", { status: 400 });
       }
 
       const stub = env.AUCTION.getByName(auctionId);
-      await stub.addBid(body.userId, body.amount);
-      return new Response(null, { status: 204 });
+      try {
+        const result = await stub.placeBid({
+          userId: body.userId,
+          amount: body.amount,
+          idempotencyKey: body.idempotencyKey,
+        });
+        return Response.json(result);
+      } catch (e: any) {
+        if (e.message === "AUCTION_NOT_FOUND") return new Response("Not found", { status: 404 });
+        if (e.message === "AUCTION_NOT_ACTIVE") return new Response("Auction not active", { status: 409 });
+        if (e.message === "BID_TOO_LOW") return new Response("Bid too low", { status: 409 });
+        throw e;
+      }
     }
 
     // GET /history?auctionId=...&limit=50 — paginated bid history
