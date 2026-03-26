@@ -59,6 +59,26 @@ export class AuctionRoom extends DurableObject {
     };
   }
 
+  addBid(userId: string, amount: number) {
+    this.ctx.storage.sql.exec(
+      `INSERT INTO bids (id, auction_id, user_id, amount, created_at, idempotency_key)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+      crypto.randomUUID(),
+      this.ctx.id.toString(),
+      userId,
+      amount,
+      Date.now(),
+      `demo-${crypto.randomUUID()}`,
+    );
+  }
+
+  listRecentBids() {
+    return this.ctx.storage.sql
+      .exec<{ user_id: string; amount: number; created_at: number }>(
+        "SELECT user_id, amount, created_at FROM bids ORDER BY created_at DESC LIMIT 20"
+      )
+      .toArray();
+  }
 }
 
 export default {
@@ -67,7 +87,8 @@ export default {
     const auctionId = url.searchParams.get("auctionId");
     if (!auctionId) return new Response("Missing auctionId", { status: 400 });
 
-    if (request.method === "POST") {
+    // POST /?auctionId=... — initialize an auction
+    if (request.method === "POST" && url.pathname === "/") {
       const body = (await request.json()) as { title?: string };
       if (!body.title) {
         return new Response("Invalid payload", { status: 400 });
@@ -76,6 +97,25 @@ export default {
       const stub = env.AUCTION.getByName(auctionId);
       await stub.initAuction({ title: body.title });
       return new Response(null, { status: 204 });
+    }
+
+    // POST /bids?auctionId=... — seed a demo bid
+    if (request.method === "POST" && url.pathname === "/bids") {
+      const body = (await request.json()) as { userId?: string; amount?: number };
+      if (!body.userId || !body.amount) {
+        return new Response("Invalid payload", { status: 400 });
+      }
+
+      const stub = env.AUCTION.getByName(auctionId);
+      await stub.addBid(body.userId, body.amount);
+      return new Response(null, { status: 204 });
+    }
+
+    // GET /bids?auctionId=... — list recent bids
+    if (url.pathname === "/bids") {
+      const stub = env.AUCTION.getByName(auctionId);
+      const bids = await stub.listRecentBids();
+      return Response.json(bids);
     }
 
     const stub = env.AUCTION.getByName(auctionId);
