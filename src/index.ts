@@ -1,8 +1,6 @@
 import { DurableObject } from "cloudflare:workers";
 
 export class AuctionRoom extends DurableObject {
-  private title: string | null = null;
-
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
 
@@ -47,16 +45,37 @@ export class AuctionRoom extends DurableObject {
     });
   }
 
-  async initAuction(input: { title: string }) {
-    this.title = input.title;
+  async initAuction(input: { title: string; startingPrice: number }) {
+    const now = Date.now();
+
+    this.ctx.storage.sql.exec(
+      `INSERT OR IGNORE INTO auction_state
+        (id, title, status, starting_price, reserve_price, current_price, created_at, updated_at)
+       VALUES (?, ?, 'draft', ?, ?, ?, ?, ?)`,
+      this.ctx.id.toString(),
+      input.title,
+      input.startingPrice,
+      input.startingPrice,
+      input.startingPrice,
+      now,
+      now,
+    );
   }
 
   async getDetails() {
-    return {
-      auctionId: this.ctx.id.toString(),
-      title: this.title,
-      status: this.title ? "active" : "not initialized",
-    };
+    return this.ctx.storage.sql
+      .exec<{
+        id: string;
+        title: string;
+        status: string;
+        starting_price: number;
+        current_price: number;
+        created_at: number;
+      }>(
+        "SELECT id, title, status, starting_price, current_price, created_at FROM auction_state WHERE id = ?",
+        this.ctx.id.toString(),
+      )
+      .one();
   }
 
   addBid(userId: string, amount: number) {
@@ -89,14 +108,14 @@ export default {
 
     // POST /?auctionId=... — initialize an auction
     if (request.method === "POST" && url.pathname === "/") {
-      const body = (await request.json()) as { title?: string };
-      if (!body.title) {
+      const body = (await request.json()) as { title?: string; startingPrice?: number };
+      if (!body.title || !body.startingPrice) {
         return new Response("Invalid payload", { status: 400 });
       }
 
       const stub = env.AUCTION.getByName(auctionId);
-      await stub.initAuction({ title: body.title });
-      return new Response(null, { status: 204 });
+      await stub.initAuction({ title: body.title, startingPrice: body.startingPrice });
+      return new Response(null, { status: 201 });
     }
 
     // POST /bids?auctionId=... — seed a demo bid
