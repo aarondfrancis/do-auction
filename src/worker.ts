@@ -1,4 +1,4 @@
-import { AuctionRoom } from "./auction-room";
+import { AuthError, requireAuth } from "./auth";
 import { callAuction } from "./stubs";
 
 export default {
@@ -39,28 +39,30 @@ export default {
       }
     }
 
-    // POST /auctions/:id/bids — place a bid
+    // POST /auctions/:id/bids — place a bid (authenticated)
     const bidMatch = pathname.match(/^\/auctions\/([^/]+)\/bids$/);
     if (request.method === "POST" && bidMatch) {
+      const { userId } = requireAuth(request);
+
       const body = (await request.json()) as {
-        userId?: string;
         amount?: number;
         idempotencyKey?: string;
       };
-      if (!body.userId || !body.amount || !body.idempotencyKey) {
+      if (!body.amount || !body.idempotencyKey) {
         return new Response("Invalid payload", { status: 400 });
       }
 
       try {
         const result = await callAuction(env, bidMatch[1], (stub) =>
           stub.placeBid({
-            userId: body.userId!,
+            userId,
             amount: body.amount!,
             idempotencyKey: body.idempotencyKey!,
           }),
         );
         return Response.json(result);
       } catch (e: any) {
+        if (e instanceof AuthError) return new Response(e.message, { status: e.status });
         if (e.message === "AUCTION_NOT_FOUND") return new Response("Not found", { status: 404 });
         if (e.message === "AUCTION_NOT_ACTIVE") return new Response("Auction not active", { status: 409 });
         if (e.message === "BID_TOO_LOW") return new Response("Bid too low", { status: 409 });
