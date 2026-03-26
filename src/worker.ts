@@ -70,6 +70,19 @@ export default {
       }
     }
 
+    // GET /auctions/:id/ws — WebSocket upgrade
+    const wsMatch = pathname.match(/^\/auctions\/([^/]+)\/ws$/);
+    if (wsMatch) {
+      const { userId } = requireAuth(request);
+
+      if (request.headers.get("Upgrade")?.toLowerCase() !== "websocket") {
+        return new Response("Expected websocket", { status: 426 });
+      }
+
+      const stub = env.AUCTION.getByName(wsMatch[1]);
+      return await stub.fetch(request);
+    }
+
     // GET /auctions/:id/history — bid history
     const historyMatch = pathname.match(/^\/auctions\/([^/]+)\/history$/);
     if (request.method === "GET" && historyMatch) {

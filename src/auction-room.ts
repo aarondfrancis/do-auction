@@ -54,6 +54,23 @@ export class AuctionRoom extends DurableObject {
     });
   }
 
+  async fetch(request: Request): Promise<Response> {
+    const upgrade = request.headers.get("Upgrade");
+    if (!upgrade || upgrade.toLowerCase() !== "websocket") {
+      return new Response("Expected websocket", { status: 426 });
+    }
+
+    const pair = new WebSocketPair();
+    const [client, server] = Object.values(pair);
+
+    this.ctx.acceptWebSocket(server);
+
+    return new Response(null, {
+      status: 101,
+      webSocket: client,
+    });
+  }
+
   async initAuction(input: { title: string; startingPrice: number }) {
     const now = Date.now();
 
