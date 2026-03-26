@@ -1,6 +1,8 @@
 import { DurableObject } from "cloudflare:workers";
 
 export class AuctionRoom extends DurableObject {
+  private messageCount = 0;
+
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
 
@@ -69,6 +71,19 @@ export class AuctionRoom extends DurableObject {
       status: 101,
       webSocket: client,
     });
+  }
+
+  async webSocketMessage(ws: WebSocket, message: string | ArrayBuffer) {
+    this.messageCount++;
+    ws.send(JSON.stringify({ type: "echo", message, messageCount: this.messageCount }));
+  }
+
+  async webSocketClose(ws: WebSocket, code: number, reason: string) {
+    ws.close(code, reason);
+  }
+
+  async webSocketError(ws: WebSocket, error: unknown) {
+    console.error("WebSocket error:", error);
   }
 
   async initAuction(input: { title: string; startingPrice: number }) {
