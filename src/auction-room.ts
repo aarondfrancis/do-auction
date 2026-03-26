@@ -2,6 +2,7 @@ import { DurableObject } from "cloudflare:workers";
 
 export class AuctionRoom extends DurableObject {
   private messageCount = 0;
+  private socketMetadata = new Map<WebSocket, { userId: string; joinedAt: number }>();
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
@@ -53,7 +54,26 @@ export class AuctionRoom extends DurableObject {
         console.error("init failed", error);
         throw error;
       }
+
+      this.rebuildSocketMetadata();
+
+      this.ctx.setWebSocketAutoResponse(
+        new WebSocketRequestResponsePair("ping", "pong"),
+      );
     });
+  }
+
+  private rebuildSocketMetadata() {
+    this.socketMetadata.clear();
+
+    for (const ws of this.ctx.getWebSockets()) {
+      const attachment = ws.deserializeAttachment() as
+        | { userId: string; joinedAt: number }
+        | null;
+      if (attachment) {
+        this.socketMetadata.set(ws, attachment);
+      }
+    }
   }
 
   async fetch(request: Request): Promise<Response> {
@@ -62,10 +82,18 @@ export class AuctionRoom extends DurableObject {
       return new Response("Expected websocket", { status: 426 });
     }
 
+    const userId = request.headers.get("x-authenticated-user-id");
+    if (!userId) {
+      return new Response("Missing websocket identity", { status: 401 });
+    }
+
     const pair = new WebSocketPair();
     const [client, server] = Object.values(pair);
 
     this.ctx.acceptWebSocket(server);
+    const metadata = { userId, joinedAt: Date.now() };
+    server.serializeAttachment(metadata);
+    this.socketMetadata.set(server, metadata);
 
     return new Response(null, {
       status: 101,
@@ -75,14 +103,24 @@ export class AuctionRoom extends DurableObject {
 
   async webSocketMessage(ws: WebSocket, message: string | ArrayBuffer) {
     this.messageCount++;
-    ws.send(JSON.stringify({ type: "echo", message, messageCount: this.messageCount }));
+
+    const metadata = this.socketMetadata.get(ws);
+
+    ws.send(JSON.stringify({
+      type: "echo",
+      message,
+      messageCount: this.messageCount,
+      userId: metadata?.userId ?? "unknown",
+    }));
   }
 
   async webSocketClose(ws: WebSocket, code: number, reason: string) {
+    this.socketMetadata.delete(ws);
     ws.close(code, reason);
   }
 
   async webSocketError(ws: WebSocket, error: unknown) {
+    this.socketMetadata.delete(ws);
     console.error("WebSocket error:", error);
   }
 

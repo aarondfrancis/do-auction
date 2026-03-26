@@ -80,7 +80,9 @@ export default {
       }
 
       const stub = env.AUCTION.getByName(wsMatch[1]);
-      return await stub.fetch(request);
+      const trustedRequest = new Request(request.url, request);
+      trustedRequest.headers.set("x-authenticated-user-id", userId);
+      return await stub.fetch(trustedRequest);
     }
 
     // GET /auctions/:id/history — bid history
