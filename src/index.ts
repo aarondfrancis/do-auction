@@ -1,4 +1,4 @@
-import { DurableObject } from "cloudflare:workers";
+import {DurableObject} from "cloudflare:workers";
 
 export class AuctionRoom extends DurableObject {
   constructor(ctx: DurableObjectState, env: Env) {
@@ -142,18 +142,18 @@ export default {
   async fetch(request: Request, env: Env) {
     const url = new URL(request.url);
     const auctionId = url.searchParams.get("auctionId");
-    if (!auctionId) return new Response("Missing auctionId", { status: 400 });
+    if (!auctionId) return new Response("Missing auctionId", {status: 400});
 
     // POST /?auctionId=... — initialize an auction
     if (request.method === "POST" && url.pathname === "/") {
       const body = (await request.json()) as { title?: string; startingPrice?: number };
       if (!body.title || !body.startingPrice) {
-        return new Response("Invalid payload", { status: 400 });
+        return new Response("Invalid payload", {status: 400});
       }
 
       const stub = env.AUCTION.getByName(auctionId);
-      await stub.initAuction({ title: body.title, startingPrice: body.startingPrice });
-      return new Response(null, { status: 201 });
+      await stub.initAuction({title: body.title, startingPrice: body.startingPrice});
+      return new Response(null, {status: 201});
     }
 
     // POST /bids?auctionId=... — place a bid
@@ -164,7 +164,7 @@ export default {
         idempotencyKey?: string;
       };
       if (!body.userId || !body.amount || !body.idempotencyKey) {
-        return new Response("Invalid payload", { status: 400 });
+        return new Response("Invalid payload", {status: 400});
       }
 
       const stub = env.AUCTION.getByName(auctionId);
@@ -176,9 +176,9 @@ export default {
         });
         return Response.json(result);
       } catch (e: any) {
-        if (e.message === "AUCTION_NOT_FOUND") return new Response("Not found", { status: 404 });
-        if (e.message === "AUCTION_NOT_ACTIVE") return new Response("Auction not active", { status: 409 });
-        if (e.message === "BID_TOO_LOW") return new Response("Bid too low", { status: 409 });
+        if (e.message === "AUCTION_NOT_FOUND") return new Response("Not found", {status: 404});
+        if (e.message === "AUCTION_NOT_ACTIVE") return new Response("Auction not active", {status: 409});
+        if (e.message === "BID_TOO_LOW") return new Response("Bid too low", {status: 409});
         throw e;
       }
     }
