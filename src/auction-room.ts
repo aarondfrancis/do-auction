@@ -1,7 +1,6 @@
 import { DurableObject } from "cloudflare:workers";
 
 export class AuctionRoom extends DurableObject {
-  private messageCount = 0;
   private socketMetadata = new Map<WebSocket, { userId: string; joinedAt: number }>();
 
   constructor(ctx: DurableObjectState, env: Env) {
@@ -113,16 +112,33 @@ export class AuctionRoom extends DurableObject {
   }
 
   async webSocketMessage(ws: WebSocket, message: string | ArrayBuffer) {
-    this.messageCount++;
-
     const metadata = this.socketMetadata.get(ws);
+    const userId = metadata?.userId ?? "unknown";
 
-    ws.send(JSON.stringify({
-      type: "echo",
-      message,
-      messageCount: this.messageCount,
-      userId: metadata?.userId ?? "unknown",
-    }));
+    if (typeof message === "string") {
+      try {
+        const parsed = JSON.parse(message) as {
+          type?: string;
+          messages?: Array<Record<string, unknown>>;
+        };
+
+        if (parsed.type === "batch" && Array.isArray(parsed.messages)) {
+          if (parsed.messages.length > 100) {
+            ws.send(JSON.stringify({ type: "error", message: "Batch too large" }));
+            return;
+          }
+
+          for (const item of parsed.messages) {
+            this.broadcast({ type: "client_event", from: userId, payload: item });
+          }
+          return;
+        }
+      } catch {
+        // Not JSON — fall through to echo
+      }
+    }
+
+    ws.send(JSON.stringify({ type: "echo", userId, message }));
   }
 
   async webSocketClose(ws: WebSocket, code: number, reason: string) {
