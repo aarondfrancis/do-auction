@@ -101,6 +101,17 @@ export class AuctionRoom extends DurableObject {
     });
   }
 
+  private broadcast(event: Record<string, unknown>) {
+    const payload = JSON.stringify(event);
+    for (const ws of this.ctx.getWebSockets()) {
+      try {
+        ws.send(payload);
+      } catch {
+        // Connection closed between getWebSockets() and send()
+      }
+    }
+  }
+
   async webSocketMessage(ws: WebSocket, message: string | ArrayBuffer) {
     this.messageCount++;
 
@@ -189,6 +200,13 @@ export class AuctionRoom extends DurableObject {
       now,
       this.ctx.id.toString(),
     );
+
+    this.broadcast({
+      type: "bid_placed",
+      auctionId: this.ctx.id.toString(),
+      userId: input.userId,
+      amount: input.amount,
+    });
 
     return {
       accepted: true,
