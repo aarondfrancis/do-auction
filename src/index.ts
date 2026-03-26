@@ -37,6 +37,15 @@ export class AuctionRoom extends DurableObject {
             type TEXT NOT NULL,
             payload_json TEXT NOT NULL
           );
+
+          CREATE INDEX IF NOT EXISTS bids_by_created
+            ON bids (created_at DESC);
+
+          CREATE INDEX IF NOT EXISTS bids_by_amount
+            ON bids (amount DESC);
+
+          CREATE UNIQUE INDEX IF NOT EXISTS bids_idempotency_scope
+            ON bids (user_id, idempotency_key);
         `);
       } catch (error) {
         console.error("init failed", error);
@@ -91,10 +100,12 @@ export class AuctionRoom extends DurableObject {
     );
   }
 
-  listRecentBids() {
+  getHistory(limit = 50, offset = 0) {
     return this.ctx.storage.sql
       .exec<{ user_id: string; amount: number; created_at: number }>(
-        "SELECT user_id, amount, created_at FROM bids ORDER BY created_at DESC LIMIT 20"
+        "SELECT user_id, amount, created_at FROM bids ORDER BY created_at DESC LIMIT ? OFFSET ?",
+        limit,
+        offset,
       )
       .toArray();
   }
@@ -130,11 +141,13 @@ export default {
       return new Response(null, { status: 204 });
     }
 
-    // GET /bids?auctionId=... — list recent bids
-    if (url.pathname === "/bids") {
+    // GET /history?auctionId=...&limit=50 — paginated bid history
+    if (url.pathname === "/history") {
       const stub = env.AUCTION.getByName(auctionId);
-      const bids = await stub.listRecentBids();
-      return Response.json(bids);
+      const limit = Number(url.searchParams.get("limit") ?? 50);
+      const offset = Number(url.searchParams.get("offset") ?? 0);
+      const history = await stub.getHistory(limit, offset);
+      return Response.json(history);
     }
 
     const stub = env.AUCTION.getByName(auctionId);
