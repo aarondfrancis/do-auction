@@ -1,4 +1,5 @@
 import { AuctionRoom } from "./auction-room";
+import { callAuction } from "./stubs";
 
 export default {
   async fetch(request: Request, env: Env) {
@@ -16,17 +17,20 @@ export default {
         return new Response("Invalid payload", { status: 400 });
       }
 
-      const stub = env.AUCTION.getByName(body.auctionId);
-      await stub.initAuction({ title: body.title, startingPrice: body.startingPrice });
+      await callAuction(env, body.auctionId, (stub) =>
+        stub.initAuction({ title: body.title!, startingPrice: body.startingPrice! }),
+      );
       return new Response(null, { status: 201 });
     }
 
     // GET /auctions/:id — auction details
     const detailsMatch = pathname.match(/^\/auctions\/([^/]+)$/);
     if (request.method === "GET" && detailsMatch) {
-      const stub = env.AUCTION.getByName(detailsMatch[1]);
       try {
-        return Response.json(await stub.getDetails());
+        const details = await callAuction(env, detailsMatch[1], (stub) =>
+          stub.getDetails(),
+        );
+        return Response.json(details);
       } catch (e: any) {
         if (e.message?.includes("AUCTION_NOT_FOUND")) {
           return new Response("Not found", { status: 404 });
@@ -47,13 +51,14 @@ export default {
         return new Response("Invalid payload", { status: 400 });
       }
 
-      const stub = env.AUCTION.getByName(bidMatch[1]);
       try {
-        const result = await stub.placeBid({
-          userId: body.userId,
-          amount: body.amount,
-          idempotencyKey: body.idempotencyKey,
-        });
+        const result = await callAuction(env, bidMatch[1], (stub) =>
+          stub.placeBid({
+            userId: body.userId!,
+            amount: body.amount!,
+            idempotencyKey: body.idempotencyKey!,
+          }),
+        );
         return Response.json(result);
       } catch (e: any) {
         if (e.message === "AUCTION_NOT_FOUND") return new Response("Not found", { status: 404 });
@@ -66,10 +71,12 @@ export default {
     // GET /auctions/:id/history — bid history
     const historyMatch = pathname.match(/^\/auctions\/([^/]+)\/history$/);
     if (request.method === "GET" && historyMatch) {
-      const stub = env.AUCTION.getByName(historyMatch[1]);
       const limit = Number(url.searchParams.get("limit") ?? 50);
       const offset = Number(url.searchParams.get("offset") ?? 0);
-      return Response.json(await stub.getHistory(limit, offset));
+      const history = await callAuction(env, historyMatch[1], (stub) =>
+        stub.getHistory(limit, offset),
+      );
+      return Response.json(history);
     }
 
     return new Response("Not found", { status: 404 });
