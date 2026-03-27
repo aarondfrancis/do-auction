@@ -12,13 +12,20 @@ export default {
         auctionId?: string;
         title?: string;
         startingPrice?: number;
+        startTime?: number;
+        endTime?: number;
       };
       if (!body.auctionId || !body.title || !body.startingPrice) {
         return new Response("Invalid payload", { status: 400 });
       }
 
       await callAuction(env, body.auctionId, (stub) =>
-        stub.initAuction({ title: body.title!, startingPrice: body.startingPrice! }),
+        stub.initAuction({
+          title: body.title!,
+          startingPrice: body.startingPrice!,
+          startTime: body.startTime,
+          endTime: body.endTime,
+        }),
       );
       return new Response(null, { status: 201 });
     }

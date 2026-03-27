@@ -167,21 +167,35 @@ export class AuctionRoom extends DurableObject {
     console.error("WebSocket error:", error);
   }
 
-  async initAuction(input: { title: string; startingPrice: number }) {
+  async initAuction(input: {
+    title: string;
+    startingPrice: number;
+    startTime?: number | null;
+    endTime?: number | null;
+  }) {
     const now = Date.now();
+    const startTime = input.startTime ?? null;
+    const endTime = input.endTime ?? null;
+    const status: AuctionStatus =
+      typeof startTime === "number" && startTime > now ? "upcoming" : "active";
 
     this.ctx.storage.sql.exec(
       `INSERT OR IGNORE INTO auction_state
-        (id, title, status, starting_price, reserve_price, current_price, created_at, updated_at)
-       VALUES (?, ?, 'active', ?, ?, ?, ?, ?)`,
+        (id, title, status, starting_price, reserve_price, current_price, start_time, end_time, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       this.ctx.id.toString(),
       input.title,
+      status,
       input.startingPrice,
       input.startingPrice,
       input.startingPrice,
+      startTime,
+      endTime,
       now,
       now,
     );
+
+    await this.reconcileAlarmSchedule();
   }
 
   async getDetails() {
@@ -257,7 +271,7 @@ export class AuctionRoom extends DurableObject {
       .toArray();
   }
 
-  transitionState(nextStatus: string) {
+  async transitionState(nextStatus: string) {
     if (!isAuctionStatus(nextStatus)) {
       throw new Error("INVALID_AUCTION_STATUS");
     }
@@ -284,6 +298,60 @@ export class AuctionRoom extends DurableObject {
       this.ctx.id.toString(),
     );
 
+    await this.reconcileAlarmSchedule();
+
     return { status: nextStatus };
+  }
+
+  private async reconcileAlarmSchedule() {
+    const now = Date.now();
+
+    const state = this.ctx.storage.sql
+      .exec<{ status: string; start_time: number | null; end_time: number | null }>(
+        "SELECT status, start_time, end_time FROM auction_state WHERE id = ?",
+        this.ctx.id.toString(),
+      )
+      .toArray()[0];
+
+    if (!state) {
+      await this.ctx.storage.deleteAlarm();
+      return;
+    }
+
+    // Determine next alarm time based on current state
+    if (state.status === "upcoming" && typeof state.start_time === "number") {
+      await this.ctx.storage.setAlarm(Math.max(state.start_time, now));
+      return;
+    }
+
+    if (state.status === "active" && typeof state.end_time === "number") {
+      await this.ctx.storage.setAlarm(Math.max(state.end_time, now));
+      return;
+    }
+
+    // No alarm needed for ended/settled/cancelled
+    await this.ctx.storage.deleteAlarm();
+  }
+
+  async alarm() {
+    const now = Date.now();
+    const state = this.ctx.storage.sql
+      .exec<{ status: string; start_time: number | null; end_time: number | null }>(
+        "SELECT status, start_time, end_time FROM auction_state WHERE id = ?",
+        this.ctx.id.toString(),
+      )
+      .toArray()[0];
+
+    if (!state) return;
+
+    if (state.status === "upcoming" && (state.start_time === null || state.start_time <= now)) {
+      await this.transitionState("active");
+      this.broadcast({ type: "auction_started", auctionId: this.ctx.id.toString() });
+    }
+
+    if (state.status === "active" && typeof state.end_time === "number" && state.end_time <= now) {
+      await this.transitionState("ended");
+      this.broadcast({ type: "auction_ended", auctionId: this.ctx.id.toString() });
+    }
   }
 }
