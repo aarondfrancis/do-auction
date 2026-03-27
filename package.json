@@ -7,10 +7,15 @@
     "dev": "wrangler dev",
     "types": "wrangler types",
     "predev": "wrangler types",
-    "postinstall": "wrangler types"
+    "postinstall": "wrangler types",
+    "test": "vitest",
+    "typecheck": "tsc --noEmit",
+    "verify": "npm run typecheck && npm test -- --run"
   },
   "devDependencies": {
+    "@cloudflare/vitest-pool-workers": "^0.13.5",
     "typescript": "^5.9.3",
+    "vitest": "^4.1.2",
     "wrangler": "^4.15.2"
   }
 }
