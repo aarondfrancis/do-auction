@@ -85,6 +85,27 @@ export default {
       return await stub.fetch(trustedRequest);
     }
 
+    // POST /auctions/:id/state — transition auction state
+    const stateMatch = pathname.match(/^\/auctions\/([^/]+)\/state$/);
+    if (request.method === "POST" && stateMatch) {
+      const body = (await request.json()) as { status?: string };
+      if (!body.status) {
+        return new Response("Invalid payload", { status: 400 });
+      }
+
+      try {
+        const result = await callAuction(env, stateMatch[1], (stub) =>
+          stub.transitionState(body.status!),
+        );
+        return Response.json(result);
+      } catch (e: any) {
+        if (e.message === "AUCTION_NOT_FOUND") return new Response("Not found", { status: 404 });
+        if (e.message === "INVALID_AUCTION_STATUS") return new Response("Invalid status", { status: 400 });
+        if (e.message?.startsWith("ILLEGAL_TRANSITION")) return new Response(e.message, { status: 409 });
+        throw e;
+      }
+    }
+
     // GET /auctions/:id/history — bid history
     const historyMatch = pathname.match(/^\/auctions\/([^/]+)\/history$/);
     if (request.method === "GET" && historyMatch) {

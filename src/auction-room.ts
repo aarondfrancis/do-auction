@@ -1,5 +1,21 @@
 import { DurableObject } from "cloudflare:workers";
 
+const AUCTION_STATUSES = ["draft", "upcoming", "active", "ended", "settled", "cancelled"] as const;
+type AuctionStatus = (typeof AUCTION_STATUSES)[number];
+
+const LEGAL_TRANSITIONS: Record<AuctionStatus, AuctionStatus[]> = {
+  draft: ["upcoming", "active", "cancelled"],
+  upcoming: ["active", "cancelled"],
+  active: ["ended", "cancelled"],
+  ended: ["settled"],
+  settled: [],
+  cancelled: [],
+};
+
+function isAuctionStatus(value: string): value is AuctionStatus {
+  return AUCTION_STATUSES.includes(value as AuctionStatus);
+}
+
 export class AuctionRoom extends DurableObject {
   private socketMetadata = new Map<WebSocket, { userId: string; joinedAt: number }>();
 
@@ -239,5 +255,35 @@ export class AuctionRoom extends DurableObject {
         offset,
       )
       .toArray();
+  }
+
+  transitionState(nextStatus: string) {
+    if (!isAuctionStatus(nextStatus)) {
+      throw new Error("INVALID_AUCTION_STATUS");
+    }
+
+    const current = this.ctx.storage.sql
+      .exec<{ status: string }>(
+        "SELECT status FROM auction_state WHERE id = ?",
+        this.ctx.id.toString(),
+      )
+      .toArray()[0];
+
+    if (!current) throw new Error("AUCTION_NOT_FOUND");
+    if (!isAuctionStatus(current.status)) throw new Error("INVALID_AUCTION_STATUS");
+
+    if (!LEGAL_TRANSITIONS[current.status].includes(nextStatus)) {
+      throw new Error(`ILLEGAL_TRANSITION:${current.status}->${nextStatus}`);
+    }
+
+    const now = Date.now();
+    this.ctx.storage.sql.exec(
+      "UPDATE auction_state SET status = ?, updated_at = ? WHERE id = ?",
+      nextStatus,
+      now,
+      this.ctx.id.toString(),
+    );
+
+    return { status: nextStatus };
   }
 }
