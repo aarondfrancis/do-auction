@@ -16,6 +16,9 @@ function isAuctionStatus(value: string): value is AuctionStatus {
   return AUCTION_STATUSES.includes(value as AuctionStatus);
 }
 
+const ANTI_SNIPE_WINDOW_MS = 30_000;
+const ANTI_SNIPE_EXTENSION_MS = 30_000;
+
 export class AuctionRoom extends DurableObject {
   private socketMetadata = new Map<WebSocket, { userId: string; joinedAt: number }>();
 
@@ -214,7 +217,7 @@ export class AuctionRoom extends DurableObject {
       .one();
   }
 
-  placeBid(input: { userId: string; amount: number; idempotencyKey: string }) {
+  async placeBid(input: { userId: string; amount: number; idempotencyKey: string }) {
     const state = this.ctx.storage.sql
       .exec<{ status: string; current_price: number }>(
         "SELECT status, current_price FROM auction_state WHERE id = ?",
@@ -254,11 +257,45 @@ export class AuctionRoom extends DurableObject {
       amount: input.amount,
     });
 
+    this.maybeApplyAntiSnipeExtension(now);
+    await this.reconcileAlarmSchedule();
+
     return {
       accepted: true,
       currentPrice: input.amount,
       winnerUserId: input.userId,
     };
+  }
+
+  private maybeApplyAntiSnipeExtension(now: number) {
+    const row = this.ctx.storage.sql
+      .exec<{ status: string; end_time: number | null }>(
+        "SELECT status, end_time FROM auction_state WHERE id = ?",
+        this.ctx.id.toString(),
+      )
+      .toArray()[0];
+
+    if (!row || row.status !== "active" || typeof row.end_time !== "number") {
+      return;
+    }
+
+    if (row.end_time - now > ANTI_SNIPE_WINDOW_MS) {
+      return;
+    }
+
+    const nextEndTime = row.end_time + ANTI_SNIPE_EXTENSION_MS;
+    this.ctx.storage.sql.exec(
+      "UPDATE auction_state SET end_time = ?, updated_at = ? WHERE id = ?",
+      nextEndTime,
+      now,
+      this.ctx.id.toString(),
+    );
+
+    this.broadcast({
+      type: "auction_extended",
+      auctionId: this.ctx.id.toString(),
+      newEndTime: nextEndTime,
+    });
   }
 
   getHistory(limit = 50, offset = 0) {
