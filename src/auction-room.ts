@@ -370,25 +370,35 @@ export class AuctionRoom extends DurableObject {
     await this.ctx.storage.deleteAlarm();
   }
 
-  async alarm() {
-    const now = Date.now();
-    const state = this.ctx.storage.sql
-      .exec<{ status: string; start_time: number | null; end_time: number | null }>(
-        "SELECT status, start_time, end_time FROM auction_state WHERE id = ?",
-        this.ctx.id.toString(),
-      )
-      .toArray()[0];
+  async alarm(alarmInfo?: { retryCount: number; isRetry: boolean }) {
+    try {
+      const now = Date.now();
+      const state = this.ctx.storage.sql
+        .exec<{ status: string; start_time: number | null; end_time: number | null }>(
+          "SELECT status, start_time, end_time FROM auction_state WHERE id = ?",
+          this.ctx.id.toString(),
+        )
+        .toArray()[0];
 
-    if (!state) return;
+      if (!state) return;
 
-    if (state.status === "upcoming" && (state.start_time === null || state.start_time <= now)) {
-      await this.transitionState("active");
-      this.broadcast({ type: "auction_started", auctionId: this.ctx.id.toString() });
-    }
+      if (state.status === "upcoming" && (state.start_time === null || state.start_time <= now)) {
+        await this.transitionState("active");
+        this.broadcast({ type: "auction_started", auctionId: this.ctx.id.toString() });
+      }
 
-    if (state.status === "active" && typeof state.end_time === "number" && state.end_time <= now) {
-      await this.transitionState("ended");
-      this.broadcast({ type: "auction_ended", auctionId: this.ctx.id.toString() });
+      if (state.status === "active" && typeof state.end_time === "number" && state.end_time <= now) {
+        await this.transitionState("ended");
+        this.broadcast({ type: "auction_ended", auctionId: this.ctx.id.toString() });
+      }
+    } catch (error) {
+      // After 5 retries, schedule a fresh alarm instead of relying on built-in backoff
+      if ((alarmInfo?.retryCount ?? 0) >= 5) {
+        await this.ctx.storage.setAlarm(Date.now() + 30_000);
+        return;
+      }
+
+      throw error;
     }
   }
 }
