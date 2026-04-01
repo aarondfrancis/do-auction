@@ -100,7 +100,7 @@ describe("auction alarms", () => {
     await runInDurableObject(stub, async (instance) => {
       await instance.alarm({ retryCount: 1, isRetry: true });
     });
-    
+
     expect((await stub.getDetails()).status).toBe("ended");
   });
 });

@@ -1,8 +1,10 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
-  "name": "durable-auction-app",
+  "name": "durable-auction-live",
   "main": "src/index.ts",
-  "compatibility_date": "2026-03-24",
+
+  "workers_dev": true,
+  "compatibility_date": "2026-03-17",
   "durable_objects": {
     "bindings": [
       {
