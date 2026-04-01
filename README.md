@@ -3,6 +3,8 @@
 `do-auction` is a compendium for the Durable Objects series at
 <https://databaseschool.com/series/durable-objects>.
 
+The full series is free on Database School.
+
 This repository contains a Cloudflare Workers + Durable Objects auction
 implementation built up over the course of the series, including:
 
